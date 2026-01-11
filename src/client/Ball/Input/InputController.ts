@@ -129,40 +129,13 @@ export class InputControls {
 		return result !== undefined;
 	}
 
-	private onStepped() {
-		if (this.enabled === false) return this.ballControlsConnection?.Disconnect();
-
-		const humanoid = this.getHumanoid();
-
-		if (!humanoid) return this.disable();
-
-		const ball = this.getBallFromPlayer();
-
-		if (!ball) return this.disable();
-
-		const camera = Workspace.CurrentCamera;
-
-		if (!camera) return;
-
-		const ballPrimaryPart = this.getPrimaryPart(ball);
-
-		if (!ballPrimaryPart) return;
-		if (
-			this.isAgainstWall(humanoid.RootPart!) &&
-			math.floor(ballPrimaryPart?.AssemblyLinearVelocity.Magnitude) >= 1
-		) {
-			ballPrimaryPart.AssemblyLinearVelocity = new Vector3(
-				ballPrimaryPart.AssemblyLinearVelocity.X,
-				30,
-				ballPrimaryPart.AssemblyLinearVelocity.Z,
-			);
-		}
-
+	private handleAirMovement(enabled: boolean, ball: Ball, humanoid: Humanoid) {
 		const mass = ball.PrimaryPart?.GetMass() ?? 1;
 		const lv = ball.Constraints.LinearVelocity as unknown as VectorForce;
 
-		if (this.isAirborne(humanoid.RootPart!)) {
-			const camera = Workspace.CurrentCamera as Camera;
+		if (enabled) {
+			const camera = Workspace.CurrentCamera;
+			if(!camera) return;
 			const forward = new Vector3(camera.CFrame.LookVector.X, 0, camera.CFrame.LookVector.Z).Unit;
 
 			const right = Vector3.yAxis.Cross(forward).Unit;
@@ -179,6 +152,38 @@ export class InputControls {
 			lv.Force = new Vector3(0, 0, 0);
 			lv.Enabled = false;
 		}
+	}
+
+	private handleWallBoost(ballPrimaryPart: BasePart) {
+		ballPrimaryPart.AssemblyLinearVelocity = new Vector3(
+			ballPrimaryPart.AssemblyLinearVelocity.X,
+			30,
+			ballPrimaryPart.AssemblyLinearVelocity.Z,
+		);
+	}
+
+	private onStepped() {
+		if (this.enabled === false) return this.ballControlsConnection?.Disconnect();
+
+		const humanoid = this.getHumanoid();
+
+		if (!humanoid) return this.disable();
+
+		const ball = this.getBallFromPlayer();
+
+		if (!ball) return this.disable();
+
+		const ballPrimaryPart = this.getPrimaryPart(ball);
+
+		if (!ballPrimaryPart) return;
+		if (
+			this.isAgainstWall(humanoid.RootPart!) &&
+			math.floor(ballPrimaryPart?.AssemblyLinearVelocity.Magnitude) >= 1
+		) {
+			this.handleWallBoost(ballPrimaryPart)
+		}
+
+		this.handleAirMovement(this.isAirborne(humanoid.RootPart!), ball, humanoid);
 	}
 
 	public enable(ball: Ball) {

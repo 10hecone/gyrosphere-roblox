@@ -1,270 +1,402 @@
 -- Compiled with roblox-ts v3.0.0
-local TS = require(game:GetService("ReplicatedStorage"):WaitForChild("rbxts_include"):WaitForChild("RuntimeLib"))
-local _services = TS.import(script, game:GetService("ReplicatedStorage"), "rbxts_include", "node_modules", "@rbxts", "services")
-local CollectionService = _services.CollectionService
-local ContextActionService = _services.ContextActionService
-local Players = _services.Players
-local RunService = _services.RunService
-local UserInputService = _services.UserInputService
-local Workspace = _services.Workspace
-local Remotes = TS.import(script, game:GetService("ReplicatedStorage"), "TS", "remotes").default
-local CameraBall = TS.import(script, script.Parent.Parent, "Camera", "Camera").CameraBall
+
+-- Runtime & services imports
+local TS = require(game:GetService("ReplicatedStorage")
+	:WaitForChild("rbxts_include")
+	:WaitForChild("RuntimeLib"))
+
+local Services = TS.import(
+	script,
+	game:GetService("ReplicatedStorage"),
+	"rbxts_include",
+	"node_modules",
+	"@rbxts",
+	"services"
+)
+
+local CollectionService     = Services.CollectionService
+local ContextActionService  = Services.ContextActionService
+local Players               = Services.Players
+local RunService            = Services.RunService
+local UserInputService      = Services.UserInputService
+local Workspace             = Services.Workspace
+
+-- Shared modules
+local Remotes = TS.import(
+	script,
+	game:GetService("ReplicatedStorage"),
+	"TS",
+	"remotes"
+).default
+
+local CameraBall = TS.import(
+	script,
+	script.Parent.Parent,
+	"Camera",
+	"Camera"
+).CameraBall
+
 local player = Players.LocalPlayer
 
---[[
-    InputControls Class
-    -------------------
-    Handles player input controls for interacting with a ball object.
-    
-    Responsibilities:
-      - Enable and disable ball control.
-      - Handle movement, jump, and grappling inputs.
-      - Apply physics interactions (impulses, collisions, linear velocity).
-      - Detect player states such as airborne or against a wall.
-]]
-local InputControls
-do
-    InputControls = setmetatable({}, {
-        __tostring = function()
-            return "InputControls"
-        end,
-    })
-    InputControls.__index = InputControls
+----------------------------------------------------------------
+-- InputControls class definition
+----------------------------------------------------------------
+local InputControls = {}
+InputControls.__index = InputControls
 
-    function InputControls.new(...)
-        local self = setmetatable({}, InputControls)
-        return self:constructor(...) or self
-    end
+function InputControls.new()
+	local self = setmetatable({}, InputControls)
+	self:constructor()
+	return self
+end
 
-    -- Constructor initializes state variables
-    function InputControls:constructor()
-        self.ball = nil                -- Reference to the player's ball
-        self.enabled = false           -- Whether input control is active
-        local _ = self.ballControlsConnection
-        self.canAttach = false         -- Whether the grappling hook can attach
-    end
+function InputControls:constructor()
+	-- Cached ball instance
+	self.ball = nil
 
-    -- Returns the Humanoid of the local player if it exists and is alive
-    function InputControls:getHumanoid()
-        local character = Players.LocalPlayer.Character
-        if not character then
-            return nil
-        end
-        local humanoid = character:FindFirstChildWhichIsA("Humanoid")
-        if humanoid == nil or humanoid.Health <= 0 then
-            return nil
-        end
-        return humanoid
-    end
+	-- Whether input logic is active
+	self.enabled = false
 
-    -- Returns the player's ball if it exists; caches it internally
-    function InputControls:getBallFromPlayer()
-        if self.ball and self.ball.Parent then
-            return self.ball
-        end
-        local ball = CollectionService:GetTagged(tostring(player.UserId))[1]
-        self.ball = ball
-        return ball
-    end
+	-- RunService connection
+	self.ballControlsConnection = nil
 
-    -- Returns the PrimaryPart of a ball if it exists
-    function InputControls:getPrimaryPart(ball)
-        return ball.PrimaryPart or nil
-    end
+	-- Unused flag (could likely be removed)
+	self.canAttach = false
+end
 
-    -- Applies a vertical jump impulse to the ball
-    function InputControls:jumpBoost()
-        local ball = self:getBallFromPlayer()
-        if not ball then
-            return nil
-        end
-        local root = self:getPrimaryPart(ball)
-        if not root then
-            return nil
-        end
-        -- Reset vertical velocity component
-        local v = root.AssemblyLinearVelocity
-        root.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
-        -- Apply vertical impulse based on mass
-        local jumpVelocity = 70
-        local impulse = Vector3.yAxis * (jumpVelocity * root.AssemblyMass)
-        root:ApplyImpulse(impulse)
-    end
+----------------------------------------------------------------
+-- Character / ball helpers
+----------------------------------------------------------------
 
-    -- Handles mouse down (attempts grappling hook)
-    InputControls.onMouseDown = TS.async(function(self)
-        local camera = Workspace.CurrentCamera
-        if not camera then return nil end
+-- Returns the player's Humanoid if valid and alive
+function InputControls:getHumanoid()
+	local character = Players.LocalPlayer.Character
+	if not character then
+		return nil
+	end
 
-        local ball = self:getBallFromPlayer()
-        if not ball then return nil end
+	local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+	if humanoid == nil or humanoid.Health <= 0 then
+		return nil
+	end
 
-        local ballPrimaryPart = self:getPrimaryPart(ball)
-        if not ballPrimaryPart then return nil end
+	return humanoid
+end
 
-        local hookSimply = CameraBall:canSimplyHook(camera.CFrame, ballPrimaryPart.CFrame)
-        if not hookSimply then return nil end
+-- Retrieves and caches the ball associated with the player
+function InputControls:getBallFromPlayer()
+	if self.ball and self.ball.Parent then
+		return self.ball
+	end
 
-        -- Call server to attempt grappling hook
-        local succes = TS.await(Remotes.Client:Get("GrappleHook"):CallServerAsync(hookSimply))
-        if not succes then return nil end
-    end)
+	local tagged = CollectionService:GetTagged(tostring(player.UserId))
+	local ball = tagged[1]
 
-    -- Handles mouse up (release grappling hook)
-    InputControls.onMouseUp = TS.async(function(self)
-        local succes = TS.await(Remotes.Client:Get("UnGrappleHook"):CallServerAsync())
-        if not succes then return nil end
-    end)
+	self.ball = ball
+	return ball
+end
 
-    -- Checks if the player is in the air
-    function InputControls:isAirborne(root)
-        if root == nil or root.Parent == nil then
-            return false
-        end
-        local ball = self:getBallFromPlayer()
-        if not ball then return false end
+-- Returns the PrimaryPart of the ball
+function InputControls:getPrimaryPart(ball)
+	local root = ball.PrimaryPart
+	if not root then
+		return nil
+	end
+	return root
+end
 
-        local rayOrigin = root.Position
-        local rayDirection = Vector3.new(0, -8, 0)
-        local raycastParams = RaycastParams.new()
-        raycastParams.FilterDescendantsInstances = {root.Parent, ball}
-        raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+----------------------------------------------------------------
+-- Movement mechanics
+----------------------------------------------------------------
 
-        local result = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
-        return result == nil
-    end
+-- Applies a vertical impulse to the ball (jump)
+function InputControls:jumpBoost()
+	local ball = self:getBallFromPlayer()
+	if not ball then return end
 
-    -- Checks if the player is against a wall
-    function InputControls:isAgainstWall(root)
-        if root == nil or root.Parent == nil then
-            return false
-        end
-        local ball = self:getBallFromPlayer()
-        if not ball then return false end
+	local root = self:getPrimaryPart(ball)
+	if not root then return end
 
-        local rayOrigin = root.Position - Vector3.new(0, 1.75, 0)
-        local look = root.CFrame.LookVector
-        local horizontalLook = Vector3.new(look.X, 0, look.Z)
-        if horizontalLook.Magnitude == 0 then return false end
+	-- Reset vertical velocity
+	local v = root.AssemblyLinearVelocity
+	root.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
 
-        local rayDirection = horizontalLook.Unit * 7.5
-        local raycastParams = RaycastParams.new()
-        raycastParams.FilterDescendantsInstances = {root.Parent, ball}
-        raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	-- Apply impulse upward
+	local jumpVelocity = 70
+	local impulse = Vector3.yAxis * (jumpVelocity * root.AssemblyMass)
+	root:ApplyImpulse(impulse)
+end
 
-        local result = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
-        return if result then result.Instance.CanCollide == true else false
-    end
+----------------------------------------------------------------
+-- Grapple hook input
+----------------------------------------------------------------
 
-    -- Called each step to apply forces and manage physics
-    function InputControls:onStepped()
-        if not self.enabled then
-            if self.ballControlsConnection then
-                self.ballControlsConnection:Disconnect()
-            end
-            return
-        end
+-- Called when grapple button is pressed
+InputControls.onMouseDown = TS.async(function(self)
+	local camera = Workspace.CurrentCamera
+	if not camera then return end
 
-        local humanoid = self:getHumanoid()
-        if not humanoid then return self:disable() end
+	local ball = self:getBallFromPlayer()
+	if not ball then return end
 
-        local ball = self:getBallFromPlayer()
-        if not ball then return self:disable() end
+	local ballPrimaryPart = self:getPrimaryPart(ball)
+	if not ballPrimaryPart then return end
 
-        local camera = Workspace.CurrentCamera
-        if not camera then return nil end
+	-- Check if grappling is possible
+	local hookData = CameraBall:canSimplyHook(
+		camera.CFrame,
+		ballPrimaryPart.CFrame
+	)
 
-        local ballPrimaryPart = self:getPrimaryPart(ball)
-        if not ballPrimaryPart then return nil end
+	if not hookData then return end
 
-        -- Wall bounce
-        if self:isAgainstWall(humanoid.RootPart) and math.floor(ballPrimaryPart.AssemblyLinearVelocity.Magnitude) >= 1 then
-            ballPrimaryPart.AssemblyLinearVelocity = Vector3.new(ballPrimaryPart.AssemblyLinearVelocity.X, 30, ballPrimaryPart.AssemblyLinearVelocity.Z)
-        end
+	-- Ask server to attach grapple
+	local success = TS.await(
+		Remotes.Client:Get("GrappleHook"):CallServerAsync(hookData)
+	)
 
-        local mass = ball.PrimaryPart and ball.PrimaryPart:GetMass() or 1
-        local lv = ball.Constraints.LinearVelocity
+	if not success then return end
+end)
 
-        -- Apply movement forces if airborne
-        if self:isAirborne(humanoid.RootPart) then
-            local forward = Vector3.new(camera.CFrame.LookVector.X, 0, camera.CFrame.LookVector.Z).Unit
-            local right = Vector3.yAxis:Cross(forward).Unit
-            local input = humanoid.MoveDirection
-            local moveDir = forward * -input.Z + right * input.X
-            local horizontal = Vector3.new(-moveDir.X, 0, moveDir.Z)
-            local accel = 100
-            local force = mass * accel
+-- Called when grapple button is released
+InputControls.onMouseUp = TS.async(function(self)
+	local success = TS.await(
+		Remotes.Client:Get("UnGrappleHook"):CallServerAsync()
+	)
 
-            lv.Force = horizontal * force
-            lv.Enabled = true
-        else
-            lv.Force = Vector3.new(0, 0, 0)
-            lv.Enabled = false
-        end
-    end
+	if not success then return end
+end)
 
-    -- Enables ball control and binds user input
-    function InputControls:enable(ball)
-        task.wait()
-        self.enabled = true
-        self.ballControlsConnection = RunService.Stepped:Connect(function() return self:onStepped() end)
+----------------------------------------------------------------
+-- Environment detection
+----------------------------------------------------------------
 
-        local playerGui = player:FindFirstChild("PlayerGui")
-        local input = playerGui:FindFirstChild("PlayContext")
-        local inputGui = playerGui:FindFirstChild("ContextInput")
-        local jump = input:FindFirstChild("Jump")
-        local grappleHook = input:FindFirstChild("GrappleHook")
-        local hud = playerGui:FindFirstChild("HUD")
-        local main = hud:FindFirstChild("FrameMain")
-        local help = main:FindFirstChild("FrameHelp")
+-- Checks if the ball is airborne (no ground detected below)
+function InputControls:isAirborne(root)
+	if not root or not root.Parent then
+		return false
+	end
 
-        -- Disconnect on ball destruction
-        ball.Destroying:Connect(function()
-            self.enabled = false
-            self:disable()
-        end)
+	local ball = self:getBallFromPlayer()
+	if not ball then
+		return false
+	end
 
-        -- Enable UI based on device type
-        if input then input.Enabled = true end
-        if UserInputService.TouchEnabled then
-            inputGui.Enabled = true
-            help.Visible = false
-        else
-            help.Visible = true
-        end
+	local rayOrigin = root.Position
+	local rayDirection = Vector3.new(0, -8, 0)
 
-        -- Bind actions
-        grappleHook.Pressed:Connect(function() return self:onMouseDown() end)
-        grappleHook.Released:Connect(function() return self:onMouseUp() end)
-        jump.Pressed:Connect(function()
-            local humanoid = self:getHumanoid()
-            if not humanoid then return nil end
-            if not self:isAirborne(humanoid.RootPart) then
-                self:jumpBoost()
-            end
-        end)
-    end
+	local params = RaycastParams.new()
+	params.FilterDescendantsInstances = { root.Parent, ball }
+	params.FilterType = Enum.RaycastFilterType.Exclude
 
-    -- Disables ball control and cleans up connections
-    function InputControls:disable()
-        self.enabled = false
+	local result = Workspace:Raycast(rayOrigin, rayDirection, params)
+	return result == nil
+end
 
-        local playerGui = player:FindFirstChild("PlayerGui")
-        if not playerGui then return nil end
+-- Checks if the player is facing a wall
+function InputControls:isAgainstWall(root)
+	if not root or not root.Parent then
+		return false
+	end
 
-        local input = playerGui:FindFirstChild("PlayContext")
-        local inputGui = playerGui:FindFirstChild("ContextInput")
+	local ball = self:getBallFromPlayer()
+	if not ball then
+		return false
+	end
 
-        if inputGui then inputGui.Enabled = false end
-        if input then input.Enabled = false end
+	local rayOrigin = root.Position - Vector3.new(0, 1.75, 0)
+	local look = root.CFrame.LookVector
+	local horizontalLook = Vector3.new(look.X, 0, look.Z)
 
-        ContextActionService:UnbindAction("GrappleHook")
-        if self.ballControlsConnection then
-            self.ballControlsConnection:Disconnect()
-        end
-    end
+	if horizontalLook.Magnitude == 0 then
+		return false
+	end
+
+	local rayDirection = horizontalLook.Unit * 7.5
+
+	local params = RaycastParams.new()
+	params.FilterDescendantsInstances = { root.Parent, ball }
+	params.FilterType = Enum.RaycastFilterType.Exclude
+
+	local result = Workspace:Raycast(rayOrigin, rayDirection, params)
+
+	if result then
+		return result.Instance.CanCollide == true
+	end
+
+	return false
+end
+
+----------------------------------------------------------------
+-- Physics handling
+----------------------------------------------------------------
+
+-- Handles mid-air directional control using LinearVelocity
+function InputControls:handleAirMovement(enabled, ball, humanoid)
+	local mass = 1
+	if ball.PrimaryPart then
+		mass = ball.PrimaryPart:GetMass()
+	end
+
+	local lv = ball.Constraints.LinearVelocity
+
+	if enabled then
+		local camera = Workspace.CurrentCamera
+		if not camera then return end
+
+		local forward = Vector3.new(
+			camera.CFrame.LookVector.X,
+			0,
+			camera.CFrame.LookVector.Z
+		).Unit
+
+		local right = Vector3.yAxis:Cross(forward).Unit
+		local input = humanoid.MoveDirection
+
+		local moveDir = (forward * -input.Z) + (right * input.X)
+		local horizontal = Vector3.new(-moveDir.X, 0, moveDir.Z)
+
+		local accel = 100
+		lv.Force = horizontal * (mass * accel)
+		lv.Enabled = true
+	else
+		lv.Force = Vector3.zero
+		lv.Enabled = false
+	end
+end
+
+-- Applies a vertical boost when colliding with a wall
+function InputControls:handleWallBoost(ballPrimaryPart)
+	ballPrimaryPart.AssemblyLinearVelocity = Vector3.new(
+		ballPrimaryPart.AssemblyLinearVelocity.X,
+		30,
+		ballPrimaryPart.AssemblyLinearVelocity.Z
+	)
+end
+
+----------------------------------------------------------------
+-- Main update loop
+----------------------------------------------------------------
+
+function InputControls:onStepped()
+	if not self.enabled then
+		if self.ballControlsConnection then
+			self.ballControlsConnection:Disconnect()
+		end
+		return
+	end
+
+	local humanoid = self:getHumanoid()
+	if not humanoid then
+		return self:disable()
+	end
+
+	local ball = self:getBallFromPlayer()
+	if not ball then
+		return self:disable()
+	end
+
+	local ballPrimaryPart = self:getPrimaryPart(ball)
+	if not ballPrimaryPart then
+		return
+	end
+
+	-- Wall boost logic
+	if self:isAgainstWall(humanoid.RootPart)
+		and math.floor(ballPrimaryPart.AssemblyLinearVelocity.Magnitude) >= 1
+	then
+		self:handleWallBoost(ballPrimaryPart)
+	end
+
+	-- Air control
+	self:handleAirMovement(
+		self:isAirborne(humanoid.RootPart),
+		ball,
+		humanoid
+	)
+end
+
+----------------------------------------------------------------
+-- Enable / Disable
+----------------------------------------------------------------
+
+function InputControls:enable(ball)
+	task.wait()
+	self.enabled = true
+
+	self.ballControlsConnection = RunService.Stepped:Connect(function()
+		self:onStepped()
+	end)
+
+	local playerGui = player:FindFirstChild("PlayerGui")
+	local input = playerGui:FindFirstChild("PlayContext")
+	local jump = input:FindFirstChild("Jump")
+	local inputGui = playerGui:FindFirstChild("ContextInput")
+
+	local grappleHook = input:FindFirstChild("GrappleHook")
+	local hud = playerGui:FindFirstChild("HUD")
+	local main = hud:FindFirstChild("FrameMain")
+	local help = main:FindFirstChild("FrameHelp")
+
+	-- Auto-disable when ball is destroyed
+	ball.Destroying:Connect(function()
+		self.enabled = false
+		self:disable()
+	end)
+
+	if input then
+		input.Enabled = true
+	end
+
+	if UserInputService.TouchEnabled then
+		inputGui.Enabled = true
+		help.Visible = false
+	else
+		help.Visible = true
+	end
+
+	grappleHook.Pressed:Connect(function()
+		self:onMouseDown()
+	end)
+
+	grappleHook.Released:Connect(function()
+		self:onMouseUp()
+	end)
+
+	jump.Pressed:Connect(function()
+		local humanoid = self:getHumanoid()
+		if not humanoid then return end
+
+		if not self:isAirborne(humanoid.RootPart) then
+			self:jumpBoost()
+		end
+	end)
+end
+
+function InputControls:disable()
+	self.enabled = false
+
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not playerGui then return end
+
+	local input = playerGui:FindFirstChild("PlayContext")
+	local inputGui = playerGui:FindFirstChild("ContextInput")
+
+	if inputGui then
+		inputGui.Enabled = false
+	end
+
+	if input then
+		input.Enabled = false
+	end
+
+	ContextActionService:UnbindAction("GrappleHook")
+
+	if self.ballControlsConnection then
+		self.ballControlsConnection:Disconnect()
+	end
 end
 
 return {
-    InputControls = InputControls,
+	InputControls = InputControls,
 }
