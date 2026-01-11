@@ -1,0 +1,4 @@
+/node_modules
+/include
+*.tsbuildinfo
+package-lock.json
