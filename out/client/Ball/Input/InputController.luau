@@ -30,7 +30,7 @@ local Remotes = TS.import(
 ).default
 
 ----------------------------------------------------------------
--- Tuning constants
+-- Constants
 -- These values control the physical behavior of the ball movement.
 ----------------------------------------------------------------
 
@@ -193,7 +193,10 @@ InputControls.onMouseDown = TS.async(function(self)
 		Remotes.Client:Get("GrappleHook"):CallServerAsync(hookData) -- Sends grappling request to server
 	)
 
-	if not success then return end -- Stops if the server rejected the request
+	if not success then return end -- Stops if the server rejected the request 
+	-- Example for rejection
+	-- The error margin imposed by the server has been exceeded.
+	-- A grapple already exists.
 end)
 
 -- This function allows you to disconnect; it does not require any special verification, as the server takes care of it. 
@@ -203,7 +206,7 @@ InputControls.onMouseUp = TS.async(function(self)
 		Remotes.Client:Get("UnGrappleHook"):CallServerAsync() -- Sends request to detach the grapple
 	)
 
-	if not success then return end -- Stops if the server rejected the request
+	if not success then return end -- Stops if the server rejected the request (for example, the grapple does not exist)
 end)
 
 ----------------------------------------------------------------
@@ -284,6 +287,9 @@ function InputControls:handleAirMovement(enabled, ball, humanoid)
 		local camera = Workspace.CurrentCamera -- Retrieves the camera
 		if not camera then return end -- Stops if missing
 
+		-- Get horizontal camera-forward direction (XZ plane only) and normalize it
+		-- Ignores vertical component to prevent unintended vertical movement
+		-- Normalization ensures consistent direction for applying forces or velocity
 		local forward = Vector3.new(
 			camera.CFrame.LookVector.X, -- Uses camera forward X component
 			0, -- Removes vertical influence
