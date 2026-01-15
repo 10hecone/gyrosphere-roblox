@@ -16,14 +16,12 @@ const player = Players.LocalPlayer;
 export class InputControls {
 	enabled: boolean;
 	ballControlsConnection: RBXScriptConnection | undefined;
-	canAttach: boolean;
 	ball: undefined | Ball;
 
 	constructor() {
 		this.ball = undefined;
 		this.enabled = false;
 		this.ballControlsConnection;
-		this.canAttach = false;
 	}
 
 	private getHumanoid(): Humanoid | undefined {
