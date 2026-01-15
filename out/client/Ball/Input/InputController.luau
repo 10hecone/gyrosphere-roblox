@@ -122,6 +122,7 @@ function InputControls:getHumanoid()
 	return humanoid -- Returns the valid humanoid instance
 end
 
+-- A safer method for retrieving the player's ball
 -- Retrieves and caches the ball associated with the player
 function InputControls:getBallFromPlayer()
 	if self.ball and self.ball.Parent then -- Checks if a cached ball exists and is still in the game
@@ -170,6 +171,7 @@ end
 ----------------------------------------------------------------
 
 -- Called when grapple button is pressed
+-- This function allows you to check whether you can hook on with your grappling hook. If so, send a server request to hook on.
 InputControls.onMouseDown = TS.async(function(self)
 	local camera = Workspace.CurrentCamera -- Retrieves the current client camera
 	if not camera then return end -- Stops if the camera does not exist
@@ -194,6 +196,7 @@ InputControls.onMouseDown = TS.async(function(self)
 	if not success then return end -- Stops if the server rejected the request
 end)
 
+-- This function allows you to disconnect; it does not require any special verification, as the server takes care of it. 
 -- Called when grapple button is released
 InputControls.onMouseUp = TS.async(function(self)
 	local success = TS.await( -- Waits for the server response
@@ -229,7 +232,7 @@ function InputControls:isAirborne(root)
 	return result == nil -- Returns true if nothing was hit (airborne)
 end
 
--- Checks if the player is facing a wall
+-- Checks if the player's ball is facing a wall
 function InputControls:isAgainstWall(root)
 	if not root or not root.Parent then -- Checks if the root part is valid
 		return false -- Returns false if invalid
@@ -268,6 +271,7 @@ end
 ----------------------------------------------------------------
 
 -- Handles mid-air directional control using LinearVelocity
+-- The enabled variable depends on whether the ball is in the void or not
 function InputControls:handleAirMovement(enabled, ball, humanoid)
 	local mass = 1 -- Default mass value
 	if ball.PrimaryPart then
@@ -301,6 +305,7 @@ function InputControls:handleAirMovement(enabled, ball, humanoid)
 	end
 end
 
+-- This function allows you to apply the boost to climb the wall
 -- Applies a vertical boost when colliding with a wall
 function InputControls:handleWallBoost(ballPrimaryPart)
 	ballPrimaryPart.AssemblyLinearVelocity = Vector3.new(
@@ -315,6 +320,11 @@ end
 ----------------------------------------------------------------
 
 function InputControls:onStepped()
+
+	----------------------------------------------------------------
+	-- Checks
+	----------------------------------------------------------------
+		
 	if not self.enabled then -- Checks if the controller is disabled
 		if self.ballControlsConnection then
 			self.ballControlsConnection:Disconnect() -- Disconnects the update loop
@@ -336,6 +346,10 @@ function InputControls:onStepped()
 	if not ballPrimaryPart then
 		return -- Stops execution if missing
 	end
+
+	----------------------------------------------------------------
+	-- Physical Handling
+	----------------------------------------------------------------
 
 	if self:isAgainstWall(humanoid.RootPart)
 		and math.floor(ballPrimaryPart.AssemblyLinearVelocity.Magnitude) >= MIN_WALL_BOOST_SPEED
@@ -362,21 +376,23 @@ function InputControls:enable(ball)
 		self:onStepped() -- Executes the per-frame update logic
 	end)
 
-	local playerGui = player:FindFirstChild("PlayerGui") -- Retrieves the PlayerGui container
-	local input = playerGui:FindFirstChild("PlayContext") -- Retrieves the main input UI container
-	local jump = input:FindFirstChild("Jump") -- Retrieves the jump input button
-	local inputGui = playerGui:FindFirstChild("ContextInput") -- Retrieves the contextual input GUI
-
-	local grappleHook = input:FindFirstChild("GrappleHook") -- Retrieves the grapple hook input button
-	local hud = playerGui:FindFirstChild("HUD") -- Retrieves the HUD container
-	local main = hud:FindFirstChild("FrameMain") -- Retrieves the main HUD frame
-	local help = main:FindFirstChild("FrameHelp") -- Retrieves the help panel frame
-
 	-- Auto-disable when ball is destroyed
 	ball.Destroying:Connect(function() -- Listens for the ball being destroyed
 		self.enabled = false -- Marks the controller as inactive
 		self:disable() -- Fully disables the input controller and cleans up connections
 	end)
+
+	local playerGui = player:FindFirstChild("PlayerGui") -- Retrieves the PlayerGui container
+
+	local input = playerGui:FindFirstChild("PlayContext") -- Retrieves the main input UI container
+	local jump = input:FindFirstChild("Jump") -- Retrieves the jump input button
+	local grappleHook = input:FindFirstChild("GrappleHook") -- Retrieves the grapple hook input button
+
+	local inputGui = playerGui:FindFirstChild("ContextInput") -- Retrieves the contextual input GUI
+
+	local hud = playerGui:FindFirstChild("HUD") -- Retrieves the HUD container
+	local main = hud:FindFirstChild("FrameMain") -- Retrieves the main HUD frame
+	local help = main:FindFirstChild("FrameHelp") -- Retrieves the help panel frame
 
 	if input then -- Checks if the input UI exists
 		input.Enabled = true -- Enables the input UI
@@ -401,6 +417,7 @@ function InputControls:enable(ball)
 		local humanoid = self:getHumanoid() -- Retrieves the player's humanoid
 		if not humanoid then return end -- Stops if the humanoid is invalid
 
+		-- This condition prevents the player from performing infinite jumps.
 		if not self:isAirborne(humanoid.RootPart) then -- Checks if the player is grounded
 			self:jumpBoost() -- Applies a jump impulse to the ball
 		end
